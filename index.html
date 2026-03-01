@@ -1,0 +1,872 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VRM Pose Viewer</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #1a1a2e; color: #eee; font-family: 'Segoe UI', sans-serif; overflow: hidden; }
+    canvas { display: block; }
+
+    #ui-left {
+      position: absolute; top: 12px; left: 12px;
+      display: flex; flex-direction: column; gap: 8px;
+      z-index: 10; width: 240px;
+      max-height: calc(100vh - 24px); overflow-y: auto;
+      scrollbar-width: thin; scrollbar-color: #334 #0000;
+    }
+    #ui-left::-webkit-scrollbar { width: 4px; }
+    #ui-left::-webkit-scrollbar-thumb { background: #334; border-radius: 2px; }
+
+    #ui-right {
+      position: absolute; top: 12px; right: 12px;
+      z-index: 10; width: 250px;
+      display: flex; flex-direction: column; gap: 0;
+    }
+
+    .panel {
+      background: rgba(0,0,0,0.55);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 10px; padding: 10px 12px;
+    }
+    .panel h3 {
+      font-size: 11px; color: #9cf; margin-bottom: 8px;
+      text-transform: uppercase; letter-spacing: 1px;
+    }
+
+    .mode-toggle { display: flex; gap: 4px; margin-bottom: 8px; }
+    .mode-btn {
+      flex: 1; padding: 4px 6px; font-size: 10px; font-weight: bold;
+      border-radius: 5px; cursor: pointer; text-align: center;
+      border: 1px solid rgba(255,255,255,0.2);
+      background: rgba(255,255,255,0.07); color: #aaa;
+    }
+    .mode-btn.active { background: rgba(80,160,220,0.35); border-color: #5af; color: #9df; }
+
+    .slot { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+    .slot-label {
+      width: 28px; height: 28px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: bold; font-size: 12px; flex-shrink: 0;
+    }
+    .slot1 .slot-label { background: #4a9; }
+    .slot2 .slot-label { background: #c84; }
+
+    .drop-btn {
+      flex: 1; padding: 6px 8px;
+      background: rgba(255,255,255,0.07);
+      border: 1px dashed rgba(255,255,255,0.25);
+      border-radius: 7px; color: #bbb; font-size: 10px;
+      cursor: pointer; text-align: center; transition: background 0.2s;
+    }
+    .drop-btn:hover { background: rgba(255,255,255,0.15); }
+    .drop-btn.loaded { border-color: #5a9; color: #9e9; border-style: solid; }
+    input[type=file] { display: none; }
+
+    .pose-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px; margin-top: 4px; }
+    .pose-btn {
+      padding: 4px 3px; background: rgba(255,255,255,0.07);
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 5px; color: #bbb; font-size: 9px; cursor: pointer; text-align: center;
+    }
+    .pose-btn:hover { background: rgba(255,255,255,0.18); }
+    .pose-btn.active { background: rgba(80,160,220,0.35); border-color: #5af; color: #9df; }
+
+    .slider-row { display: flex; align-items: center; gap: 6px; margin-top: 5px; }
+    .slider-row label { font-size: 10px; color: #999; width: 56px; flex-shrink: 0; }
+    .slider-row input[type=range] { flex: 1; }
+
+    .guide { font-size: 10px; color: #666; line-height: 1.8; }
+
+    .res-row { display: flex; gap: 4px; margin-top: 4px; flex-wrap: wrap; }
+    .res-btn {
+      padding: 3px 8px; font-size: 9px; cursor: pointer;
+      border-radius: 4px; border: 1px solid rgba(255,255,255,0.2);
+      background: rgba(255,255,255,0.07); color: #bbb;
+    }
+    .res-btn:hover { background: rgba(255,255,255,0.18); }
+    .res-btn.active { background: rgba(80,160,220,0.35); border-color: #5af; color: #9df; }
+
+    #bone-panel {
+      background: rgba(0,0,0,0.6); border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 10px; overflow: hidden;
+    }
+    #bone-panel-header {
+      padding: 8px 12px; background: rgba(0,0,0,0.4);
+      font-size: 11px; color: #9cf; text-transform: uppercase; letter-spacing: 1px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .bone-tab {
+      padding: 3px 10px; border-radius: 4px; cursor: pointer;
+      font-size: 11px; font-weight: bold;
+      border: 1px solid rgba(255,255,255,0.2);
+      background: rgba(255,255,255,0.07); color: #aaa;
+    }
+    .bone-tab.active-a { background: rgba(60,180,120,0.4); border-color: #4a9; color: #9e9; }
+    .bone-tab.active-b { background: rgba(200,130,60,0.4); border-color: #c84; color: #ec9; }
+    #btn-bone-reset {
+      margin-left: auto; padding: 2px 8px; font-size: 9px;
+      background: rgba(200,80,80,0.3); border: 1px solid #c55;
+      border-radius: 4px; color: #faa; cursor: pointer;
+    }
+    #bone-scroll {
+      max-height: calc(100vh - 100px); overflow-y: auto; padding: 6px 0;
+      scrollbar-width: thin; scrollbar-color: #334 #111;
+    }
+    #bone-scroll::-webkit-scrollbar { width: 5px; }
+    #bone-scroll::-webkit-scrollbar-track { background: #111; }
+    #bone-scroll::-webkit-scrollbar-thumb { background: #334; border-radius: 3px; }
+    .bone-group-header {
+      padding: 5px 12px; font-size: 10px; color: #7ab;
+      background: rgba(80,120,180,0.15); cursor: pointer; user-select: none;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .bone-group-header:hover { background: rgba(80,120,180,0.25); }
+    .bone-group-header .arrow { font-size: 8px; transition: transform 0.2s; }
+    .bone-group-header.collapsed .arrow { transform: rotate(-90deg); }
+    .bone-group-body { padding: 2px 0; }
+    .bone-group-body.hidden { display: none; }
+    .bone-row { padding: 3px 12px 3px 18px; }
+    .bone-name { font-size: 9px; color: #888; margin-bottom: 2px; }
+    .bone-axes { display: flex; flex-direction: column; gap: 2px; }
+    .bone-axis-row { display: flex; align-items: center; gap: 4px; }
+    .bone-axis-label { font-size: 8px; color: #556; width: 10px; flex-shrink: 0; }
+    .bone-axis-row input[type=range] { flex: 1; height: 3px; accent-color: #7ab; }
+    .bone-axis-val { font-size: 8px; color: #668; width: 28px; text-align: right; flex-shrink: 0; }
+
+    #loading {
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+      background: rgba(0,0,0,0.75); padding: 20px 36px; border-radius: 10px;
+      font-size: 15px; display: none; z-index: 20;
+    }
+    #error-msg {
+      position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+      background: rgba(180,40,40,0.9); padding: 12px 24px; border-radius: 8px;
+      font-size: 13px; display: none; z-index: 20; max-width: 500px; text-align: center;
+    }
+    #success-msg {
+      position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+      background: rgba(40,140,80,0.9); padding: 12px 24px; border-radius: 8px;
+      font-size: 13px; display: none; z-index: 20; max-width: 500px; text-align: center;
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- ======== 左パネル ======== -->
+  <div id="ui-left">
+
+    <div class="panel">
+      <h3>🧑 キャラクター</h3>
+      <div class="mode-toggle">
+        <div class="mode-btn active" id="mode-single" onclick="setViewMode('single')">👤 1人</div>
+        <div class="mode-btn" id="mode-pair" onclick="setViewMode('pair')">👥 2人</div>
+      </div>
+      <div class="slot slot1">
+        <div class="slot-label">A</div>
+        <div class="drop-btn" id="btn1" onclick="document.getElementById('file1').click()">VRM を選択</div>
+        <input type="file" id="file1" accept=".vrm,.glb">
+      </div>
+      <div class="slot slot2" id="slot2-wrapper">
+        <div class="slot-label">B</div>
+        <div class="drop-btn" id="btn2" onclick="document.getElementById('file2').click()">VRM (2人目) を選択</div>
+        <input type="file" id="file2" accept=".vrm,.glb">
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>🎭 プリセットポーズ</h3>
+      <div class="pose-row" id="pose-btns">
+        <div class="pose-btn active" data-pose="stand">🧍 立ち</div>
+        <div class="pose-btn" data-pose="sit_knees">🤗 膝抱え</div>
+        <div class="pose-btn" data-pose="sit_legs">🧘 脚伸ばし</div>
+        <div class="pose-btn" data-pose="sit_cross">🪑 座り</div>
+        <div class="pose-btn" data-pose="lean_back">🙆 後傾</div>
+        <div class="pose-btn" data-pose="hug">🫂 寄り添い</div>
+      </div>
+      <div style="display:flex;gap:5px;margin-top:6px" id="pose-apply-btns">
+        <button onclick="applyPose(0)"
+          style="flex:1;padding:4px;background:rgba(80,170,120,0.3);border:1px solid #4a9;border-radius:5px;color:#9e9;font-size:10px;cursor:pointer">A に適用</button>
+        <button id="pose-apply-b" onclick="applyPose(1)"
+          style="flex:1;padding:4px;background:rgba(200,130,60,0.3);border:1px solid #c84;border-radius:5px;color:#ec9;font-size:10px;cursor:pointer">B に適用</button>
+        <button id="pose-apply-both" onclick="applyPoseToAll()"
+          style="flex:1;padding:4px;background:rgba(100,130,200,0.3);border:1px solid #68c;border-radius:5px;color:#adf;font-size:10px;cursor:pointer">両方</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>🔍 ポーズJSON読み込み</h3>
+      <div class="slot" style="margin-bottom:0">
+        <div class="drop-btn" id="btnJson" onclick="document.getElementById('fileJson').click()" style="border-style:dashed">📂 pose JSON を読み込む</div>
+        <input type="file" id="fileJson" accept=".json">
+      </div>
+      <div id="poseJsonInfo" style="font-size:9px;color:#5c8;margin-top:5px;display:none"></div>
+      <div id="jsonPosNote" style="font-size:9px;color:#fa8;margin-top:4px;display:none">
+        📍 位置情報適用中 &nbsp;
+        <span onclick="clearJsonPositions()" style="cursor:pointer;text-decoration:underline;color:#f86">配置スライダーに戻す</span>
+      </div>
+    </div>
+
+    <div class="panel" id="spacing-panel">
+      <h3>📐 配置</h3>
+      <div class="slider-row">
+        <label>横間隔 (X)</label>
+        <input type="range" id="spacing" min="0" max="1.5" step="0.05" value="0.4" oninput="updateSpacing()">
+      </div>
+      <div class="slider-row">
+        <label>高さ差 (Y)</label>
+        <input type="range" id="yOffset" min="-0.8" max="0.8" step="0.02" value="0" oninput="updateSpacing()">
+      </div>
+      <div class="slider-row">
+        <label>奥行き差 (Z)</label>
+        <input type="range" id="zOffset" min="-1.0" max="1.0" step="0.05" value="0" oninput="updateSpacing()">
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>📍 位置・向き</h3>
+      <div style="display:flex;gap:4px;margin-bottom:6px">
+        <div id="rot-tab-a" class="pose-btn active" onclick="setRotSlot(0)" style="flex:1;font-size:10px;font-weight:bold;color:#9e9;border-color:#4a9">A</div>
+        <div id="rot-tab-b" class="pose-btn" onclick="setRotSlot(1)" style="flex:1;font-size:10px;font-weight:bold">B</div>
+        <div class="pose-btn" onclick="resetCharPosRot()" style="flex:1;font-size:9px;color:#faa;border-color:#c55">リセット</div>
+      </div>
+      <div style="font-size:9px;color:#7ab;margin:4px 0 2px">— 位置 —</div>
+      <div class="slider-row">
+        <label style="color:#fc9">X 左右</label>
+        <input type="range" id="char-pos-x" min="-1.5" max="1.5" step="0.01" value="0" oninput="updateCharPosition()" style="accent-color:#fc9">
+        <span id="char-pos-x-val" style="font-size:9px;color:#fc9;width:36px;text-align:right">0.00</span>
+      </div>
+      <div class="slider-row">
+        <label style="color:#fc9">Y 高さ</label>
+        <input type="range" id="char-pos-y" min="-0.5" max="2.0" step="0.01" value="0" oninput="updateCharPosition()" style="accent-color:#fc9">
+        <span id="char-pos-y-val" style="font-size:9px;color:#fc9;width:36px;text-align:right">0.00</span>
+      </div>
+      <div class="slider-row">
+        <label style="color:#fc9">Z 奥行</label>
+        <input type="range" id="char-pos-z" min="-1.5" max="1.5" step="0.01" value="0" oninput="updateCharPosition()" style="accent-color:#fc9">
+        <span id="char-pos-z-val" style="font-size:9px;color:#fc9;width:36px;text-align:right">0.00</span>
+      </div>
+      <div style="font-size:9px;color:#7ab;margin:6px 0 2px">— 向き —</div>
+      <div class="slider-row">
+        <label style="color:#f87">X 前後傾</label>
+        <input type="range" id="char-rot-x" min="-90" max="90" step="1" value="0" oninput="updateCharRotation()" style="accent-color:#f87">
+        <span id="char-rot-x-val" style="font-size:9px;color:#f87;width:28px;text-align:right">0°</span>
+      </div>
+      <div class="slider-row">
+        <label style="color:#8f8">Y 左右回転</label>
+        <input type="range" id="char-rot-y" min="-180" max="180" step="1" value="0" oninput="updateCharRotation()" style="accent-color:#8f8">
+        <span id="char-rot-y-val" style="font-size:9px;color:#8f8;width:28px;text-align:right">0°</span>
+      </div>
+      <div class="slider-row">
+        <label style="color:#78f">Z 横傾き</label>
+        <input type="range" id="char-rot-z" min="-90" max="90" step="1" value="0" oninput="updateCharRotation()" style="accent-color:#78f">
+        <span id="char-rot-z-val" style="font-size:9px;color:#78f;width:28px;text-align:right">0°</span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>📸 PNG保存</h3>
+      <div style="font-size:9px;color:#7ab;margin-bottom:4px">解像度</div>
+      <div class="res-row">
+        <div class="res-btn" data-res="512" onclick="setResolution(this)">512</div>
+        <div class="res-btn active" data-res="768" onclick="setResolution(this)">768</div>
+        <div class="res-btn" data-res="1024" onclick="setResolution(this)">1024</div>
+        <div class="res-btn" data-res="1536" onclick="setResolution(this)">1536</div>
+      </div>
+      <div style="display:flex;gap:5px;margin-top:8px">
+        <button onclick="saveScreenshot()"
+          style="flex:1;padding:6px;background:rgba(100,180,140,0.3);border:1px solid #5a9;border-radius:5px;color:#9e9;font-size:10px;cursor:pointer">⬇ PNG保存</button>
+        <button onclick="copyScreenshotToClipboard()"
+          style="flex:1;padding:6px;background:rgba(100,140,200,0.3);border:1px solid #68c;border-radius:5px;color:#adf;font-size:10px;cursor:pointer">📋 コピー</button>
+      </div>
+      <div id="screenshot-msg" style="font-size:9px;color:#5c8;margin-top:5px;display:none"></div>
+    </div>
+
+    <div class="panel">
+      <h3>💾 JSONエクスポート</h3>
+      <div style="display:flex;gap:5px;margin-bottom:6px;align-items:center">
+        <input type="text" id="export-filename" value="pose_export" placeholder="ファイル名"
+          style="flex:1;padding:4px 6px;background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.2);border-radius:5px;color:#ddd;font-size:10px">
+        <span style="font-size:9px;color:#666">.json</span>
+      </div>
+      <div style="display:flex;gap:5px">
+        <button onclick="exportPoseJson()"
+          style="flex:1;padding:6px;background:rgba(100,180,100,0.3);border:1px solid #6a6;border-radius:5px;color:#aea;font-size:10px;cursor:pointer">⬇ ダウンロード</button>
+        <button onclick="copyPoseJson()"
+          style="flex:1;padding:6px;background:rgba(100,140,200,0.3);border:1px solid #68c;border-radius:5px;color:#adf;font-size:10px;cursor:pointer">📋 クリップボード</button>
+      </div>
+      <div id="export-msg" style="font-size:9px;color:#5c8;margin-top:5px;display:none"></div>
+    </div>
+
+    <div class="panel">
+      <div class="guide">🖱️ 左ドラッグ: 回転 &nbsp; 右: 移動 &nbsp; ホイール: ズーム</div>
+    </div>
+  </div>
+
+  <!-- ======== 右パネル (ボーン調整) ======== -->
+  <div id="ui-right">
+    <div id="bone-panel">
+      <div id="bone-panel-header">
+        🦴 ボーン調整
+        <div class="bone-tab active-a" id="tab-a" onclick="setBoneSlot(0)">A</div>
+        <div class="bone-tab" id="tab-b" onclick="setBoneSlot(1)">B</div>
+        <button id="btn-bone-reset" onclick="resetBoneSlot()">リセット</button>
+      </div>
+      <div id="bone-scroll"><!-- JS で動的生成 --></div>
+    </div>
+  </div>
+
+  <div id="loading">⏳ 読み込み中…</div>
+  <div id="error-msg"></div>
+  <div id="success-msg"></div>
+
+  <script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/",
+    "@pixiv/three-vrm": "https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@2.1.3/lib/three-vrm.module.js"
+  }
+}
+</script>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+    import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
+
+    // ============================================================
+    // Scene
+    // ============================================================
+    const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.shadowMap.enabled = true;
+    document.body.appendChild(renderer.domElement);
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x16192e);
+
+    const floor = new THREE.Mesh(
+      new THREE.CircleGeometry(3, 48),
+      new THREE.MeshStandardMaterial({ color: 0x1e2040, roughness: 0.9 })
+    );
+    floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true;
+    scene.add(floor);
+    scene.add(new THREE.GridHelper(6, 24, 0x2a2d50, 0x1e2040));
+
+    scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+    const key = new THREE.DirectionalLight(0xfff8ee, 1.4);
+    key.position.set(2, 3, 2); key.castShadow = true; scene.add(key);
+    scene.add(Object.assign(new THREE.DirectionalLight(0x8899ff, 0.5), { position: { x:-2, y:1, z:-1 } }));
+    scene.add(Object.assign(new THREE.DirectionalLight(0xffd0a0, 0.3), { position: { x:0, y:2, z:-3 } }));
+
+    const camera = new THREE.PerspectiveCamera(28, window.innerWidth / window.innerHeight, 0.05, 100);
+    camera.position.set(0, 0.8, 3.2);
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.target.set(0, 0.6, 0);
+    controls.enableDamping = true; controls.dampingFactor = 0.07;
+    controls.minDistance = 0.3; controls.maxDistance = 12;
+    controls.update();
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // ============================================================
+    // VRM
+    // ============================================================
+    const vrms = [null, null];
+    const clock = new THREE.Clock();
+    const loader = new GLTFLoader();
+    loader.register(p => new VRMLoaderPlugin(p));
+
+    function setLoading(v) { document.getElementById('loading').style.display = v ? 'block' : 'none'; }
+    function showError(msg) {
+      const el = document.getElementById('error-msg');
+      el.textContent = '⚠️ ' + msg; el.style.display = 'block';
+      setTimeout(() => el.style.display = 'none', 5000);
+    }
+    function showSuccess(msg) {
+      const el = document.getElementById('success-msg');
+      el.textContent = '✅ ' + msg; el.style.display = 'block';
+      setTimeout(() => el.style.display = 'none', 3000);
+    }
+
+    function loadVRMSlot(slot, arrayBuffer, filename) {
+      setLoading(true);
+      if (vrms[slot]) { scene.remove(vrms[slot].scene); VRMUtils.deepDispose(vrms[slot].scene); vrms[slot] = null; }
+      loader.parse(arrayBuffer, '', (gltf) => {
+        setLoading(false);
+        const vrm = gltf.userData.vrm;
+        if (vrm) {
+          VRMUtils.rotateVRM0(vrm);
+          vrm.scene.rotation.y = Math.PI;
+          vrm.scene.castShadow = true;
+          scene.add(vrm.scene);
+          vrms[slot] = vrm;
+          updateSpacing();
+          document.getElementById(`btn${slot + 1}`).textContent = '✅ ' + filename;
+          document.getElementById(`btn${slot + 1}`).classList.add('loaded');
+          syncBoneSlidersFromVRM(slot);
+        } else {
+          scene.add(gltf.scene);
+          showError(`${filename}: VRM拡張なし。GLBとして表示します。`);
+        }
+      }, err => { setLoading(false); showError('読み込みエラー: ' + (err.message || err)); });
+    }
+
+    // ============================================================
+    // 1人/2人モード
+    // ============================================================
+    let viewMode = 'single';
+
+    window.setViewMode = function(mode) {
+      viewMode = mode;
+      document.getElementById('mode-single').classList.toggle('active', mode === 'single');
+      document.getElementById('mode-pair').classList.toggle('active', mode === 'pair');
+      const pair = mode === 'pair';
+      document.getElementById('slot2-wrapper').style.display = pair ? 'flex' : 'none';
+      document.getElementById('spacing-panel').style.display = pair ? 'block' : 'none';
+      document.getElementById('pose-apply-b').style.display = pair ? '' : 'none';
+      document.getElementById('pose-apply-both').style.display = pair ? '' : 'none';
+      document.getElementById('rot-tab-b').style.display = pair ? '' : 'none';
+      document.getElementById('tab-b').style.display = pair ? '' : 'none';
+      if (!pair && vrms[0]) vrms[0].scene.position.set(0, 0, 0);
+    };
+
+    // 初期状態（1人モード）
+    ['slot2-wrapper','spacing-panel'].forEach(id => document.getElementById(id).style.display = 'none');
+    ['pose-apply-b','pose-apply-both','rot-tab-b','tab-b'].forEach(id => document.getElementById(id).style.display = 'none');
+
+    // ============================================================
+    // Pose Definitions
+    // ============================================================
+    const DEG = Math.PI / 180;
+    const POSES = {
+      stand: {},
+      sit_knees: {
+        spine:{x:15*DEG}, chest:{x:10*DEG},
+        leftUpperLeg:{x:-100*DEG,z:8*DEG}, rightUpperLeg:{x:-100*DEG,z:-8*DEG},
+        leftLowerLeg:{x:95*DEG}, rightLowerLeg:{x:95*DEG},
+        leftUpperArm:{x:-30*DEG,z:35*DEG}, rightUpperArm:{x:-30*DEG,z:-35*DEG},
+        leftLowerArm:{x:50*DEG}, rightLowerArm:{x:50*DEG},
+      },
+      sit_legs: {
+        spine:{x:-10*DEG}, chest:{x:-5*DEG},
+        leftUpperLeg:{x:-75*DEG,z:6*DEG}, rightUpperLeg:{x:-75*DEG,z:-6*DEG},
+        leftLowerLeg:{x:10*DEG}, rightLowerLeg:{x:10*DEG},
+        leftUpperArm:{x:-10*DEG,z:50*DEG}, rightUpperArm:{x:-10*DEG,z:-30*DEG},
+        leftLowerArm:{x:20*DEG}, rightLowerArm:{x:20*DEG},
+      },
+      sit_cross: {
+        spine:{x:5*DEG},
+        leftUpperLeg:{x:-85*DEG,z:15*DEG}, rightUpperLeg:{x:-85*DEG,z:-15*DEG},
+        leftLowerLeg:{x:80*DEG,z:-10*DEG}, rightLowerLeg:{x:80*DEG,z:10*DEG},
+        leftUpperArm:{z:20*DEG}, rightUpperArm:{z:-20*DEG},
+      },
+      lean_back: {
+        spine:{x:-20*DEG}, chest:{x:-10*DEG},
+        leftUpperLeg:{x:-60*DEG,z:5*DEG}, rightUpperLeg:{x:-60*DEG,z:-5*DEG},
+        leftLowerLeg:{x:15*DEG}, rightLowerLeg:{x:15*DEG},
+        leftUpperArm:{x:10*DEG,z:30*DEG}, rightUpperArm:{x:10*DEG,z:-10*DEG},
+        rightLowerArm:{x:30*DEG},
+      },
+      hug: {
+        spine:{x:10*DEG}, chest:{x:5*DEG},
+        leftUpperLeg:{x:-80*DEG,z:5*DEG}, rightUpperLeg:{x:-80*DEG,z:-5*DEG},
+        leftLowerLeg:{x:70*DEG}, rightLowerLeg:{x:70*DEG},
+        leftUpperArm:{x:-20*DEG,z:60*DEG}, rightUpperArm:{x:-20*DEG,z:-60*DEG},
+        leftLowerArm:{x:40*DEG}, rightLowerArm:{x:40*DEG},
+      },
+    };
+
+    const BONE_MAP = {
+      hips:'hips', spine:'spine', chest:'chest', neck:'neck', head:'head',
+      leftUpperArm:'leftUpperArm', leftLowerArm:'leftLowerArm', leftHand:'leftHand',
+      rightUpperArm:'rightUpperArm', rightLowerArm:'rightLowerArm', rightHand:'rightHand',
+      leftUpperLeg:'leftUpperLeg', leftLowerLeg:'leftLowerLeg', leftFoot:'leftFoot',
+      rightUpperLeg:'rightUpperLeg', rightLowerLeg:'rightLowerLeg', rightFoot:'rightFoot',
+    };
+
+    let selectedPose = 'stand';
+
+    function applyPoseToVRM(vrm, poseName) {
+      if (!vrm) return;
+      const pose = POSES[poseName] || {};
+      Object.values(BONE_MAP).forEach(bn => { const n = vrm.humanoid?.getNormalizedBoneNode?.(bn); if (n) n.rotation.set(0,0,0); });
+      Object.entries(pose).forEach(([k, rot]) => {
+        const n = vrm.humanoid?.getNormalizedBoneNode?.(BONE_MAP[k]); if (!n) return;
+        if (rot.x !== undefined) n.rotation.x = rot.x;
+        if (rot.y !== undefined) n.rotation.y = rot.y;
+        if (rot.z !== undefined) n.rotation.z = rot.z;
+      });
+    }
+
+    window.applyPose = (slot) => { applyPoseToVRM(vrms[slot], selectedPose); syncBoneSlidersFromVRM(slot); };
+    window.applyPoseToAll = () => { [0,1].forEach(s => { applyPoseToVRM(vrms[s], selectedPose); syncBoneSlidersFromVRM(s); }); };
+
+    document.getElementById('pose-btns').addEventListener('click', (e) => {
+      const btn = e.target.closest('.pose-btn'); if (!btn) return;
+      document.querySelectorAll('#pose-btns .pose-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active'); selectedPose = btn.dataset.pose;
+    });
+
+    // ============================================================
+    // Spacing
+    // ============================================================
+    const jsonHasPosition = [false, false];
+
+    window.updateSpacing = function() {
+      if (viewMode === 'single') { if (vrms[0] && !jsonHasPosition[0]) vrms[0].scene.position.set(0,0,0); return; }
+      const sp = parseFloat(document.getElementById('spacing').value);
+      const yo = parseFloat(document.getElementById('yOffset').value);
+      const zo = parseFloat(document.getElementById('zOffset').value);
+      if (vrms[0] && !jsonHasPosition[0]) vrms[0].scene.position.set(-sp/2, yo, zo/2);
+      if (vrms[1] && !jsonHasPosition[1]) vrms[1].scene.position.set(sp/2, 0, -zo/2);
+    };
+
+    window.clearJsonPositions = function() {
+      jsonHasPosition[0] = false; jsonHasPosition[1] = false;
+      updateSpacing();
+      document.getElementById('jsonPosNote').style.display = 'none';
+    };
+
+    // ============================================================
+    // Pose JSON
+    // ============================================================
+    function applyPoseFromJsonData(poseData) {
+      const n = poseData._meta?.num_persons ?? 0;
+      const infoEl = document.getElementById('poseJsonInfo');
+      if (n === 0) { infoEl.textContent='⚠️ 人物が検出されませんでした'; infoEl.style.color='#f88'; infoEl.style.display='block'; return; }
+      let positionUsed = false;
+      const limit = viewMode === 'single' ? 1 : Math.min(n, 2);
+      for (let i = 0; i < limit; i++) {
+        const p = poseData[`person_${i}`]; if (!p || !vrms[i]) continue;
+        const vrm = vrms[i];
+        Object.values(BONE_MAP).forEach(bn => { const nd=vrm.humanoid?.getNormalizedBoneNode?.(bn); if(nd) nd.rotation.set(0,0,0); });
+        if (p.position) { vrm.scene.position.set(p.position.x??0, p.position.y??0, p.position.z??0); jsonHasPosition[i]=true; positionUsed=true; } else { jsonHasPosition[i]=false; }
+        if (p.scene_rotation) { vrm.scene.rotation.x=(p.scene_rotation.x??0)*DEG; vrm.scene.rotation.y=Math.PI+(p.scene_rotation.y??0)*DEG; vrm.scene.rotation.z=(p.scene_rotation.z??0)*DEG; }
+        Object.entries(p).forEach(([bn, rot]) => {
+          if (bn==='position'||bn==='scene_rotation'||!BONE_MAP[bn]) return;
+          const nd=vrm.humanoid?.getNormalizedBoneNode?.(BONE_MAP[bn]); if (!nd) return;
+          if (rot.x!==undefined) nd.rotation.x=-rot.x;
+          if (rot.y!==undefined) nd.rotation.y=rot.y;
+          if (rot.z!==undefined) nd.rotation.z=-rot.z;
+        });
+        syncBoneSlidersFromVRM(i);
+      }
+      infoEl.textContent=`✅ ${n}人分のポーズを適用（${poseData._meta?.image??''}）`;
+      infoEl.style.color='#5c8'; infoEl.style.display='block';
+      document.getElementById('jsonPosNote').style.display = positionUsed ? 'block' : 'none';
+    }
+
+    document.getElementById('fileJson').addEventListener('change', (e) => {
+      const file = e.target.files[0]; if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        try {
+          const data = JSON.parse(ev.target.result);
+          document.getElementById('btnJson').textContent = '✅ ' + file.name;
+          document.getElementById('btnJson').classList.add('loaded');
+          applyPoseFromJsonData(data);
+        } catch(err) { showError('JSON読み込みエラー: ' + err.message); }
+      };
+      reader.readAsText(file);
+    });
+
+    // ============================================================
+    // File Input / Drag & Drop
+    // ============================================================
+    ['file1','file2'].forEach((id, slot) => {
+      document.getElementById(id).addEventListener('change', (e) => {
+        const file = e.target.files[0]; if (!file) return;
+        const reader = new FileReader();
+        reader.onload = ev => loadVRMSlot(slot, ev.target.result, file.name);
+        reader.readAsArrayBuffer(file);
+      });
+    });
+    document.body.addEventListener('dragover', e => e.preventDefault());
+    document.body.addEventListener('drop', e => {
+      e.preventDefault();
+      Array.from(e.dataTransfer.files).filter(f => /\.(vrm|glb)$/i.test(f.name)).forEach((file, i) => {
+        if (viewMode === 'single' && i > 0) return;
+        if (i > 1) return;
+        const reader = new FileReader();
+        reader.onload = ev => loadVRMSlot(i, ev.target.result, file.name);
+        reader.readAsArrayBuffer(file);
+      });
+    });
+
+    // ============================================================
+    // URLパラメータによる自動VRM読み込み
+    //   1人: ?vrm=chara_a.vrm  または ?vrm_a=chara_a.vrm
+    //   2人: ?vrm_a=chara_a.vrm&vrm_b=chara_b.vrm
+    // ============================================================
+    (async function autoLoadVrmFromUrl() {
+      const params = new URLSearchParams(window.location.search);
+      const vrm1 = params.get('vrm') || params.get('vrm_a');
+      const vrm2 = params.get('vrm_b');
+
+      async function fetchAndLoad(filename, slot) {
+        try {
+          const res = await fetch('/' + filename);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          loadVRMSlot(slot, await res.arrayBuffer(), filename);
+        } catch(e) { showError(`VRM自動読み込み失敗 (${filename}): ${e.message}`); }
+      }
+
+      if (vrm2) { setViewMode('pair'); if (vrm1) await fetchAndLoad(vrm1, 0); await fetchAndLoad(vrm2, 1); }
+      else if (vrm1) { await fetchAndLoad(vrm1, 0); }
+    })();
+
+    // ============================================================
+    // ボーン調整スライダー
+    // ============================================================
+    const BONE_GROUPS = [
+      { label:'🗣 頭部・首', bones:[{key:'neck',label:'首',axes:['x','y','z']},{key:'head',label:'頭',axes:['x','y','z']}] },
+      { label:'🫀 胴体',   bones:[{key:'hips',label:'腰',axes:['x','y','z']},{key:'spine',label:'背骨',axes:['x','y','z']},{key:'chest',label:'胸',axes:['x','y','z']}] },
+      { label:'💪 左腕',  bones:[{key:'leftUpperArm',label:'左上腕',axes:['x','y','z']},{key:'leftLowerArm',label:'左前腕',axes:['x','z']},{key:'leftHand',label:'左手首',axes:['x','y','z']}] },
+      { label:'💪 右腕',  bones:[{key:'rightUpperArm',label:'右上腕',axes:['x','y','z']},{key:'rightLowerArm',label:'右前腕',axes:['x','z']},{key:'rightHand',label:'右手首',axes:['x','y','z']}] },
+      { label:'🦵 左脚',  bones:[{key:'leftUpperLeg',label:'左大腿',axes:['x','y','z']},{key:'leftLowerLeg',label:'左膝',axes:['x']},{key:'leftFoot',label:'左足首',axes:['x','z']}] },
+      { label:'🦵 右脚',  bones:[{key:'rightUpperLeg',label:'右大腿',axes:['x','y','z']},{key:'rightLowerLeg',label:'右膝',axes:['x']},{key:'rightFoot',label:'右足首',axes:['x','z']}] },
+    ];
+    const AXIS_COLOR = { x:'#f87', y:'#8f8', z:'#78f' };
+    let boneSlot = 0;
+
+    function buildBoneSliders() {
+      const scroll = document.getElementById('bone-scroll');
+      let html = '';
+      BONE_GROUPS.forEach((group, gi) => {
+        html += `<div class="bone-group-header" data-gi="${gi}" onclick="toggleGroup(this)"><span class="arrow">▼</span>${group.label}</div><div class="bone-group-body" id="group-body-${gi}">`;
+        group.bones.forEach(bone => {
+          html += `<div class="bone-row"><div class="bone-name">${bone.label} (${bone.key})</div><div class="bone-axes">`;
+          bone.axes.forEach(ax => {
+            const id = `bs_${bone.key}_${ax}`;
+            html += `<div class="bone-axis-row"><span class="bone-axis-label" style="color:${AXIS_COLOR[ax]}">${ax.toUpperCase()}</span><input type="range" id="${id}" min="-180" max="180" step="1" value="0" oninput="onBoneSlider('${bone.key}','${ax}',this.value)" style="accent-color:${AXIS_COLOR[ax]}"><span class="bone-axis-val" id="${id}_val">0°</span></div>`;
+          });
+          html += `</div></div>`;
+        });
+        html += `</div>`;
+      });
+      scroll.innerHTML = html;
+    }
+
+    window.toggleGroup = function(header) {
+      header.classList.toggle('collapsed');
+      document.getElementById(`group-body-${header.dataset.gi}`).classList.toggle('hidden');
+    };
+
+    window.onBoneSlider = function(boneKey, axis, valStr) {
+      const deg = parseFloat(valStr);
+      document.getElementById(`bs_${boneKey}_${axis}_val`).textContent = `${Math.round(deg)}°`;
+      const nd = vrms[boneSlot]?.humanoid?.getNormalizedBoneNode?.(BONE_MAP[boneKey]);
+      if (nd) nd.rotation[axis] = deg * DEG;
+    };
+
+    function syncBoneSlidersFromVRM(slot) {
+      if (slot !== boneSlot) return;
+      const vrm = vrms[slot]; if (!vrm) return;
+      BONE_GROUPS.forEach(group => group.bones.forEach(bone => {
+        const nd = vrm.humanoid?.getNormalizedBoneNode?.(BONE_MAP[bone.key]); if (!nd) return;
+        bone.axes.forEach(ax => {
+          const val = nd.rotation[ax] / DEG;
+          const el = document.getElementById(`bs_${bone.key}_${ax}`);
+          const valEl = document.getElementById(`bs_${bone.key}_${ax}_val`);
+          if (el) el.value = val;
+          if (valEl) valEl.textContent = `${Math.round(val)}°`;
+        });
+      }));
+    }
+
+    window.setBoneSlot = function(slot) {
+      boneSlot = slot;
+      document.getElementById('tab-a').className = 'bone-tab' + (slot===0?' active-a':'');
+      document.getElementById('tab-b').className = 'bone-tab' + (slot===1?' active-b':'');
+      syncBoneSlidersFromVRM(slot);
+    };
+
+    window.resetBoneSlot = function() {
+      const vrm = vrms[boneSlot]; if (!vrm) return;
+      Object.values(BONE_MAP).forEach(bn => { const nd=vrm.humanoid?.getNormalizedBoneNode?.(bn); if(nd) nd.rotation.set(0,0,0); });
+      syncBoneSlidersFromVRM(boneSlot);
+    };
+
+    buildBoneSliders();
+
+    // ============================================================
+    // キャラ位置・向き
+    // ============================================================
+    let rotSlot = 0;
+
+    window.setRotSlot = function(slot) {
+      rotSlot = slot;
+      document.getElementById('rot-tab-a').className = 'pose-btn' + (slot===0?' active':'');
+      document.getElementById('rot-tab-b').className = 'pose-btn' + (slot===1?' active':'');
+      const vrm = vrms[slot]; if (!vrm) return;
+      const rx=vrm.scene.rotation.x/DEG, ry=(vrm.scene.rotation.y-Math.PI)/DEG, rz=vrm.scene.rotation.z/DEG;
+      ['x','y','z'].forEach(ax => {
+        const rv = ax==='x'?rx:ax==='y'?ry:rz;
+        document.getElementById(`char-rot-${ax}`).value=rv;
+        document.getElementById(`char-rot-${ax}-val`).textContent=`${Math.round(rv)}°`;
+      });
+      const {x:px,y:py,z:pz} = vrm.scene.position;
+      ['x','y','z'].forEach(ax => {
+        const pv = ax==='x'?px:ax==='y'?py:pz;
+        document.getElementById(`char-pos-${ax}`).value=pv;
+        document.getElementById(`char-pos-${ax}-val`).textContent=pv.toFixed(2);
+      });
+    };
+
+    window.updateCharPosition = function() {
+      const px=parseFloat(document.getElementById('char-pos-x').value);
+      const py=parseFloat(document.getElementById('char-pos-y').value);
+      const pz=parseFloat(document.getElementById('char-pos-z').value);
+      document.getElementById('char-pos-x-val').textContent=px.toFixed(2);
+      document.getElementById('char-pos-y-val').textContent=py.toFixed(2);
+      document.getElementById('char-pos-z-val').textContent=pz.toFixed(2);
+      const vrm=vrms[rotSlot]; if(!vrm) return;
+      vrm.scene.position.set(px,py,pz);
+      jsonHasPosition[rotSlot]=true;
+      document.getElementById('jsonPosNote').style.display='block';
+    };
+
+    window.updateCharRotation = function() {
+      const rx=parseFloat(document.getElementById('char-rot-x').value);
+      const ry=parseFloat(document.getElementById('char-rot-y').value);
+      const rz=parseFloat(document.getElementById('char-rot-z').value);
+      document.getElementById('char-rot-x-val').textContent=`${Math.round(rx)}°`;
+      document.getElementById('char-rot-y-val').textContent=`${Math.round(ry)}°`;
+      document.getElementById('char-rot-z-val').textContent=`${Math.round(rz)}°`;
+      const vrm=vrms[rotSlot]; if(!vrm) return;
+      vrm.scene.rotation.x=rx*DEG; vrm.scene.rotation.y=Math.PI+ry*DEG; vrm.scene.rotation.z=rz*DEG;
+    };
+
+    window.resetCharPosRot = function() {
+      const vrm=vrms[rotSlot]; if(!vrm) return;
+      vrm.scene.rotation.set(0,Math.PI,0); vrm.scene.position.set(0,0,0);
+      ['x','y','z'].forEach(ax => {
+        document.getElementById(`char-rot-${ax}`).value=0; document.getElementById(`char-rot-${ax}-val`).textContent='0°';
+        document.getElementById(`char-pos-${ax}`).value=0; document.getElementById(`char-pos-${ax}-val`).textContent='0.00';
+      });
+      jsonHasPosition[rotSlot]=false;
+      if(!jsonHasPosition[0]&&!jsonHasPosition[1]) document.getElementById('jsonPosNote').style.display='none';
+    };
+
+    // ============================================================
+    // PNG保存
+    // ============================================================
+    let screenshotRes = 768;
+
+    window.setResolution = function(btn) {
+      document.querySelectorAll('.res-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      screenshotRes = parseInt(btn.dataset.res);
+    };
+
+    function getScreenshotBlob(size) {
+      return new Promise(resolve => {
+        const w = size, h = Math.round(size / (window.innerWidth / window.innerHeight));
+        renderer.setSize(w, h);
+        camera.aspect = w / h; camera.updateProjectionMatrix();
+        renderer.render(scene, camera);
+        renderer.domElement.toBlob(blob => {
+          renderer.setSize(window.innerWidth, window.innerHeight);
+          camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix();
+          resolve(blob);
+        }, 'image/png');
+      });
+    }
+
+    window.saveScreenshot = async function() {
+      const blob = await getScreenshotBlob(screenshotRes);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const ts = new Date().toISOString().replace(/[:.]/g,'-').slice(0,19);
+      a.href=url; a.download=`vrm_pose_${ts}_${screenshotRes}px.png`; a.click();
+      URL.revokeObjectURL(url);
+      const msg = document.getElementById('screenshot-msg');
+      msg.textContent=`✅ ${screenshotRes}px で保存しました`; msg.style.display='block';
+      setTimeout(()=>msg.style.display='none', 3000);
+    };
+
+    window.copyScreenshotToClipboard = async function() {
+      try {
+        const blob = await getScreenshotBlob(screenshotRes);
+        await navigator.clipboard.write([new ClipboardItem({'image/png':blob})]);
+        const msg = document.getElementById('screenshot-msg');
+        msg.textContent='📋 クリップボードにコピーしました'; msg.style.display='block';
+        setTimeout(()=>msg.style.display='none', 3000);
+      } catch(e) { showError('コピー失敗: ' + e.message); }
+    };
+
+    // ============================================================
+    // JSON エクスポート
+    // ============================================================
+    function buildExportJson() {
+      const THRESHOLD = 0.001;
+      const numPersons = vrms.filter(v=>v!==null).length;
+      const out = { _meta:{ image:document.getElementById('export-filename').value||'pose_export', num_persons:numPersons } };
+      vrms.forEach((vrm, i) => {
+        if (!vrm) return;
+        const person = {};
+        const {x,y,z} = vrm.scene.position;
+        person.position = { x:Math.round(x*1000)/1000, y:Math.round(y*1000)/1000, z:Math.round(z*1000)/1000 };
+        const srx=vrm.scene.rotation.x/DEG, sry=(vrm.scene.rotation.y-Math.PI)/DEG, srz=vrm.scene.rotation.z/DEG;
+        if (Math.abs(srx)>0.1||Math.abs(sry)>0.1||Math.abs(srz)>0.1)
+          person.scene_rotation = { x:Math.round(srx*10)/10, y:Math.round(sry*10)/10, z:Math.round(srz*10)/10 };
+        Object.entries(BONE_MAP).forEach(([jsonKey, boneName]) => {
+          const nd=vrm.humanoid?.getNormalizedBoneNode?.(boneName); if(!nd) return;
+          const rx=nd.rotation.x, ry=nd.rotation.y, rz=nd.rotation.z;
+          if (Math.abs(rx)<THRESHOLD&&Math.abs(ry)<THRESHOLD&&Math.abs(rz)<THRESHOLD) return;
+          const b={};
+          if(Math.abs(rx)>=THRESHOLD) b.x=Math.round(-rx*1000)/1000;
+          if(Math.abs(ry)>=THRESHOLD) b.y=Math.round(ry*1000)/1000;
+          if(Math.abs(rz)>=THRESHOLD) b.z=Math.round(-rz*1000)/1000;
+          person[jsonKey]=b;
+        });
+        out[`person_${i}`]=person;
+      });
+      return JSON.stringify(out, null, 4);
+    }
+
+    window.exportPoseJson = function() {
+      const json=buildExportJson();
+      const filename=(document.getElementById('export-filename').value||'pose_export')+'.json';
+      const url=URL.createObjectURL(new Blob([json],{type:'application/json'}));
+      const a=document.createElement('a'); a.href=url; a.download=filename; a.click();
+      URL.revokeObjectURL(url);
+      const msg=document.getElementById('export-msg');
+      msg.textContent=`✅ ${filename} を保存しました`; msg.style.display='block';
+      setTimeout(()=>msg.style.display='none', 3000);
+    };
+
+    window.copyPoseJson = function() {
+      navigator.clipboard.writeText(buildExportJson()).then(()=>{
+        const msg=document.getElementById('export-msg');
+        msg.textContent='📋 クリップボードにコピーしました'; msg.style.display='block';
+        setTimeout(()=>msg.style.display='none', 3000);
+      });
+    };
+
+    // ============================================================
+    // Render Loop
+    // ============================================================
+    function animate() {
+      requestAnimationFrame(animate);
+      const delta = clock.getDelta();
+      vrms.forEach(v => v?.update(delta));
+      controls.update();
+      renderer.render(scene, camera);
+    }
+    animate();
+  </script>
+</body>
+</html>
